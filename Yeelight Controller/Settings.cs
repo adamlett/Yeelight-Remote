@@ -38,6 +38,20 @@ namespace Yeelight_Controller
             File.WriteAllText(@directory + key.name, Serialize(key));
         }
 
+        public static void WriteIPToFile(string IP)
+        {
+            File.WriteAllText(@directory + "IP", IP);
+        }
+
+        public static string ReadIPFromFile()
+        {
+            if (File.Exists(directory + "IP"))
+            {
+                return File.ReadAllText(directory + "IP");
+            }
+            else return null;
+        }
+
         public static T restoreSetting<T>(string name)
         {
             if (File.Exists(directory + name))

@@ -1,81 +1,48 @@
 ﻿using NHotkey;
 using NHotkey.Wpf;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
 using System.Windows.Forms;
 using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
-using System.Xml.Serialization;
 
 namespace Yeelight_Controller
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        public class KBShortcut
-        {
-            public ModifierKeys modifiers;
-            public Key key;
-            public string name;
-            public string description;
-
-            public KBShortcut(string name, ModifierKeys modifiers, Key pressedKey)
-            {
-                var converter = new KeysConverter();
-                string modifierString = converter.ConvertToString(modifiers);
-                string key = converter.ConvertToString(pressedKey);
-
-                // Supress unwanted keys
-                if (key == "LeftCtrl" || key == "RightCtrl" || key == "LeftShift" || key == "RightShift" || key == "System" || key == "LWin" || key == "RWin")
-                    key = "";
-
-                this.name = name;
-                this.modifiers = modifiers;
-                this.key = pressedKey;
-                this.description = modifierString + " + " + key;
-            }
-
-            public KBShortcut() { } // Required to serialize class
-        }
+        private int currentBrightness = 50;
+        private bool dragActive = false;
+        private bool ready = false;
+        private string address;
+        private TcpClient tcpClient;
+        private KBShortcut toggleKeyboardShortcut, increaseBrightnessShortcut, decreaseBrightnessShortcut;
 
         public MainWindow()
         {
             InitializeComponent();
             RestoreKeyboardShortcuts();
+            ready = true;
+            RestoreLastConnection();
+            
         }
 
-        private int currentBrightness = 50;
-        private string address;
-        private TcpClient tcpClient;
-        private bool dragActive = false;
-
-        private KBShortcut toggleKeyboardShortcut, increaseBrightnessShortcut, decreaseBrightnessShortcut;
+        #region Keyboard Shortcuts
 
         private void RestoreKeyboardShortcuts()
         {
             // Restore the keyboard shortcuts
-            SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Toggle Lights"), ToggleLightsKeyPress, "Toggle Lights", ModifierKeys.Shift, Key.F1, toggleShortcutBox);
-            SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Brightness Up"), IncreaseBrightnessKeyPress, "Brightness Up", ModifierKeys.Shift, Key.F3, brightnessUpShortcut);
-            SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Brightness Down"), DecreaseBrightnessKeyPress, "Brightness Down", ModifierKeys.Shift, Key.F2, brightnessDownShortcut);
+            toggleKeyboardShortcut = SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Toggle Lights"), 
+                ToggleLightsKeyPress, "Toggle Lights", ModifierKeys.Shift, Key.F1, toggleShortcutBox);
+            increaseBrightnessShortcut = SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Brightness Up"), 
+                IncreaseBrightnessKeyPress, "Brightness Up", ModifierKeys.Shift, Key.F3, brightnessUpShortcut);
+            decreaseBrightnessShortcut = SetKeyboardShortcut(Settings.restoreSetting<KBShortcut>("Brightness Down"), 
+                DecreaseBrightnessKeyPress, "Brightness Down", ModifierKeys.Shift, Key.F2, brightnessDownShortcut);
         }
 
-        private void SetKeyboardShortcut(KBShortcut shortcut, EventHandler<HotkeyEventArgs> handler, string name, ModifierKeys default_modifiers, 
+        private KBShortcut SetKeyboardShortcut(KBShortcut shortcut, EventHandler<HotkeyEventArgs> handler, string name, ModifierKeys default_modifiers, 
             Key default_key, System.Windows.Controls.TextBox textbox)
         {
             shortcut = Settings.restoreSetting<KBShortcut>(name);
@@ -83,48 +50,56 @@ namespace Yeelight_Controller
                 shortcut = new KBShortcut(name, default_modifiers, default_key);
             HotkeyManager.Current.AddOrReplace(name, shortcut.key, shortcut.modifiers, handler);
             textbox.Text = shortcut.description;
+
+            return shortcut;
+        }
+
+        #endregion
+
+        private void RestoreLastConnection()
+        {
+            address = Settings.ReadIPFromFile();
+            if (address != null)
+            {
+                ipEntryBox.Text = address;
+                InitialiseConnection();
+            }
         }
 
         #region Button Listeners
 
-        private void scan_Click(object sender, RoutedEventArgs e)
+        private void ScanClick(object sender, RoutedEventArgs e)
         {
             Console.WriteLine("Scan");
             scanningGrid.Visibility = Visibility.Visible;
         }
 
-        private void toggle_Click(object sender, RoutedEventArgs e)
+        private void ToggleClick(object sender, RoutedEventArgs e)
         {
             Console.WriteLine("Toggled");
             ToggleLights();
         }
 
-        private void Toggle_shortcut_Click(object sender, RoutedEventArgs e)
+        private void ChangeShortcutButton(string name, string description, EventHandler<HotkeyEventArgs> handler, KBShortcut shortcut)
         {
-            HotkeyManager.Current.AddOrReplace("Toggle", toggleKeyboardShortcut.key, toggleKeyboardShortcut.modifiers, ToggleLightsKeyPress);
-            Console.WriteLine("Toggled Shortcut");
-            System.Windows.MessageBox.Show("Toggle lights shortcut set to: \n" + toggleKeyboardShortcut.description);
-
+            HotkeyManager.Current.AddOrReplace(name, shortcut.key, shortcut.modifiers, handler);
+            System.Windows.MessageBox.Show(description + shortcut.description);
             Settings.WriteShortcutToFile(toggleKeyboardShortcut);
         }
 
-        private void Brightness_up_Click(object sender, RoutedEventArgs e)
+        private void ToggleLightsClick(object sender, RoutedEventArgs e)
         {
-            HotkeyManager.Current.AddOrReplace("Brightness Up", increaseBrightnessShortcut.key, increaseBrightnessShortcut.modifiers, IncreaseBrightnessKeyPress);
-            Console.WriteLine("Brightness Up Keyboard Set");
-            System.Windows.MessageBox.Show("Increase brightness shortcut set to: \n" + increaseBrightnessShortcut.description);
-
-            Settings.WriteShortcutToFile(increaseBrightnessShortcut);
+            ChangeShortcutButton("Toggle", "Toggle lights shortcut set to: \n", ToggleLightsKeyPress, toggleKeyboardShortcut);
         }
 
-        private void Brightness_down_Click(object sender, RoutedEventArgs e)
+        private void BrightnessUpClick(object sender, RoutedEventArgs e)
         {
-            HotkeyManager.Current.AddOrReplace("Brightness Down", decreaseBrightnessShortcut.key, decreaseBrightnessShortcut.modifiers, DecreaseBrightnessKeyPress);
-            Console.WriteLine("Brightness Down Keyboard Set");
+            ChangeShortcutButton("Brightness Up", "Increase brightness shortcut set to: \n", IncreaseBrightnessKeyPress, increaseBrightnessShortcut);
+        }
 
-            System.Windows.MessageBox.Show("Decrease brightness shortcut set to: \n" + decreaseBrightnessShortcut.description);
-
-            Settings.WriteShortcutToFile(decreaseBrightnessShortcut);
+        private void BrightnessDownClick(object sender, RoutedEventArgs e)
+        {
+            ChangeShortcutButton("Brightness Down", "Decrease brightness shortcut set to: \n", DecreaseBrightnessKeyPress, decreaseBrightnessShortcut);
         }
 
         #endregion
@@ -164,18 +139,12 @@ namespace Yeelight_Controller
 
         #endregion
 
-        private void GetBrightnessStatus()
-        {
-            // Requests the current brightness status
-
-            // Send a JSON request to the lighbulb, at the address of the connected bulb
-            HttpWebRequest request;
-        }
-
         private bool InitialiseConnection()
         {
+            if (!ready)
+                return false;
+
             // Define ports to use for TCP, the default IP address to use etc.
-            address = "192.168.1.225";
             IPAddress ip = IPAddress.Parse(address);
 
             // Setup the end-point
@@ -186,19 +155,24 @@ namespace Yeelight_Controller
 
             try
             {
+                scanningGrid.Visibility = Visibility.Visible;
                 tcpClient.Connect(sending_end_point);
             }
-            catch (SocketException e)
+            catch (SocketException)
             {
-                Console.WriteLine("Couldn't connect to socket. Check the Network Connection.");
-                Environment.Exit(1);
+                Console.WriteLine("Couldn't connect to socket. The IP may be incorrect or there may be no network connection");
+                //Environment.Exit(1);
+                connectionLabel.Content = "Not connected.";
             }
-
-           
 
             if (tcpClient.Connected)
             {
+                scanningGrid.Visibility = Visibility.Hidden;
                 Console.Write("Connected to device.");
+                connectionLabel.Content = "Connected.";
+
+                //Save the current IP address
+                Settings.WriteIPToFile(address);
             }
             else
             {
@@ -213,19 +187,13 @@ namespace Yeelight_Controller
         private void ToggleShortcut_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
             e.Handled = true;
-
             var converter = new KeysConverter();
-
             string modifierString = converter.ConvertToString(e.KeyboardDevice.Modifiers);
             string key = converter.ConvertToString(e.Key);
 
             // Supress unwanted keys
-            if (key == "LeftCtrl" || key == "RightCtrl" || key == "LeftShift" || key == "RightShift" 
-                || key == "System" || key == "LWin" || key == "RWin")
-            {
+            if (key == "LeftCtrl" || key == "RightCtrl" || key == "LeftShift" || key == "RightShift"  || key == "System" || key == "LWin" || key == "RWin")
                 key = "";
-            }
-
             System.Windows.Controls.TextBox textbox = (System.Windows.Controls.TextBox)sender;
            
             switch (textbox.Name)
@@ -247,7 +215,6 @@ namespace Yeelight_Controller
         }
 
         #endregion
-
 
         #region Keypresses
 
@@ -281,6 +248,24 @@ namespace Yeelight_Controller
         private void ToggleLights()
         {
             SendCommand("{\"id\":1,\"method\":\"toggle\",\"params\":[]}\r\n");
+        }
+
+        private void ConnectBtn(object sender, RoutedEventArgs e)
+        {
+            if (ipEntryBox.Text.Length == 0)
+            {
+                System.Windows.MessageBox.Show("Empty input. Enter a valid IP or hostname");
+            }
+            else
+            {
+                address = ipEntryBox.Text;
+                InitialiseConnection();
+            }
+        }
+
+        private void TextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+        {
+
         }
 
         private void SetBrightness(int brightness, int smooth_time)
