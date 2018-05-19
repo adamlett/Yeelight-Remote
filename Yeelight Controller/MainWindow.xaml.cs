@@ -1,10 +1,13 @@
 ﻿using NHotkey;
 using NHotkey.Wpf;
 using System;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Input;
@@ -19,15 +22,65 @@ namespace Yeelight_Controller
         private string address;
         private TcpClient tcpClient;
         private KBShortcut toggleKeyboardShortcut, increaseBrightnessShortcut, decreaseBrightnessShortcut;
+        private BulbScanner bulbScanner;
+        private bool powerState = false;
 
         public MainWindow()
         {
             InitializeComponent();
             RestoreKeyboardShortcuts();
             ready = true;
+            bulbScanner = new BulbScanner(this);
             RestoreLastConnection();
-            
+
+            bulbScanner.SendDiscoveryRequest();
+           // bulbScanner.ListenForResponses();
+            ReceiveChangeNotifications();
         }
+
+
+
+        private void ReceiveChangeNotifications()
+        {
+
+            new Thread(() =>
+            {
+                Thread.CurrentThread.IsBackground = true;
+
+                while(tcpClient.Connected)
+                {
+                    if (tcpClient.Available > 0)
+                    {
+                        byte[] buffer = new byte[1024];
+                        tcpClient.Client.Receive(buffer);
+                        
+
+                        string response = Encoding.UTF8.GetString(buffer);
+                      //  System.Windows.MessageBox.Show(response);
+
+
+                        Regex regex = new Regex("(?<=\"bright\":{).*?(?=})");
+                        Match m = regex.Match(response);
+
+
+                        if (m.Success)
+                        {
+                            ChangeSliderPosition(int.Parse(m.Value));
+                        }
+
+
+
+                    }
+                    Thread.Sleep(1000);
+                }
+
+            }).Start();
+
+
+
+        }
+
+
 
         #region Keyboard Shortcuts
 
@@ -58,11 +111,21 @@ namespace Yeelight_Controller
 
         private void RestoreLastConnection()
         {
-            address = Settings.ReadIPFromFile();
+            InitiateNewConnection(Settings.ReadIPFromFile());
+        }
+
+        public void InitiateNewConnection(string address)
+        {
+            this.address = address;
+
             if (address != null)
             {
-                ipEntryBox.Text = address;
-                InitialiseConnection();
+                this.Dispatcher.Invoke(() =>
+                {
+                    ipEntryBox.Text = address;
+                    InitialiseConnection();
+                });
+              
             }
         }
 
@@ -72,6 +135,9 @@ namespace Yeelight_Controller
         {
             Console.WriteLine("Scan");
             scanningGrid.Visibility = Visibility.Visible;
+
+            bulbScanner.SendDiscoveryRequest();
+           // bulbScanner.ListenForResponses();
         }
 
         private void ToggleClick(object sender, RoutedEventArgs e)
@@ -137,6 +203,29 @@ namespace Yeelight_Controller
             dragActive = false;
         }
 
+        // Changes the slider position programatically
+        public void ChangeSliderPosition(int value)
+        {
+            // Use UI thread to update slider value
+            this.Dispatcher.Invoke(() =>
+            {
+                slider.Value = value;
+            });
+            
+        }
+
+        public void UpdatePowerState(string state)
+        {
+            powerState = state.Equals("on");
+
+                // Use UI thread to update label
+                this.Dispatcher.Invoke(() =>
+            {
+                toggleLights.Content = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(state);
+            });
+
+        } 
+
         #endregion
 
         private bool InitialiseConnection()
@@ -156,12 +245,18 @@ namespace Yeelight_Controller
             try
             {
                 scanningGrid.Visibility = Visibility.Visible;
-                tcpClient.Connect(sending_end_point);
+                //tcpClient.Connect(sending_end_point);
+                if (!tcpClient.ConnectAsync(ip, 55443).Wait(2000))
+                {
+                    // connection failure
+                    System.Windows.MessageBox.Show("Connection failed");
+                }
+
+
             }
             catch (SocketException)
             {
                 Console.WriteLine("Couldn't connect to socket. The IP may be incorrect or there may be no network connection");
-                //Environment.Exit(1);
                 connectionLabel.Content = "Not connected.";
             }
 
@@ -181,6 +276,7 @@ namespace Yeelight_Controller
 
             return tcpClient.Connected;
         }
+
 
         #region Keyboard Shortcuts
 
@@ -247,6 +343,8 @@ namespace Yeelight_Controller
 
         private void ToggleLights()
         {
+            powerState = !powerState;
+            toggleLights.Content = (powerState) ? "On" : "Off";
             SendCommand("{\"id\":1,\"method\":\"toggle\",\"params\":[]}\r\n");
         }
 
