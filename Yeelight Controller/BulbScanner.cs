@@ -63,8 +63,7 @@ namespace Yeelight_Controller
             timer.Elapsed += new ElapsedEventHandler((s, e) => {
                 Console.WriteLine("Listening cancelled.");
                 tokenSource.Cancel();
-                udpClient.Close();
-                udpClient = null;
+                CloseUdpClient();
             });
             timer.AutoReset = false;
             timer.Interval = 10000;
@@ -99,8 +98,7 @@ namespace Yeelight_Controller
                             window.InitiateNewConnection("192.168.0.13");
                             // Stop listening
                             tokenSource.Cancel();
-                            udpClient.Close();
-                            udpClient = null;
+                            CloseUdpClient();
 
                         }
                         Thread.Sleep(10);
@@ -111,6 +109,15 @@ namespace Yeelight_Controller
                     }
                 }
             }, token);
+        }
+
+        private void CloseUdpClient()
+        {
+            if (udpClient != null)
+            {
+                udpClient.Close();
+                udpClient = null;
+            }
         }
 
         private string GetParameterValue(string paramName, string response)

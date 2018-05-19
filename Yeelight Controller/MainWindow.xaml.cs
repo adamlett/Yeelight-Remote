@@ -56,10 +56,10 @@ namespace Yeelight_Controller
                         
 
                         string response = Encoding.UTF8.GetString(buffer);
-                      //  System.Windows.MessageBox.Show(response);
+                        //System.Windows.MessageBox.Show(response);
 
 
-                        Regex regex = new Regex("(?<=\"bright\":{).*?(?=})");
+                        Regex regex = new Regex("(?<=\"bright\":).*?(?=})");
                         Match m = regex.Match(response);
 
 
@@ -71,7 +71,7 @@ namespace Yeelight_Controller
 
 
                     }
-                    Thread.Sleep(1000);
+                    Thread.Sleep(100);
                 }
 
             }).Start();
